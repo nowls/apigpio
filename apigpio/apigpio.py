@@ -387,7 +387,7 @@ class _callback_handler(object):
         # TODO: handle connection errors !
         yield from self._loop.sock_connect(self.s, address)
         self.handle = yield from self._pigpio_aio_command(_PI_CMD_NOIB, 0, 0)
-        asyncio.async(self._wait_for_notif())
+        asyncio.ensure_future(self._wait_for_notif(), loop=self._loop)
 
     @asyncio.coroutine
     def close(self):
