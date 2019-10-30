@@ -472,7 +472,7 @@ class _callback_handler(object):
     def _pigpio_aio_command(self, cmd,  p1, p2,):
         # FIXME: duplication with pi._pigpio_aio_command
         data = struct.pack('IIII', cmd, p1, p2, 0)
-        self._loop.sock_sendall(self.s, data)
+        yield from self._loop.sock_sendall(self.s, data)
         response = yield from self._loop.sock_recv(self.s, 16)
         _, res = struct.unpack('12sI', response)
         return res
@@ -526,13 +526,13 @@ class Pi(object):
         """
         with (yield from self._lock):
             data = struct.pack('IIII', cmd, p1, p2, 0)
-            self._loop.sock_sendall(self.s, data)
+            yield from self._loop.sock_sendall(self.s, data)
             response = yield from self._loop.sock_recv(self.s, 16)
             _, res = struct.unpack('12sI', response)
             return res
 
     @asyncio.coroutine
-    def _pigpio_aio_command_ext(self, cmd, p1, p2, p3, extents, rl=True):
+    def _pigpio_aio_command_ext(self, cmd, p1, p2, p3, extents):
         """
         Runs an extended pigpio socket command.
 
@@ -544,16 +544,20 @@ class Pi(object):
         extents:= additional data blocks
         """
         with (yield from self._lock):
-            ext = bytearray(struct.pack('IIII', cmd, p1, p2, p3))
-            for x in extents:
-                if isinstance(x, str):
-                    ext.extend(_b(x))
-                else:
-                    ext.extend(x)
-            self._loop.sock_sendall(self.s, ext)
-            response = yield from self._loop.sock_recv(self.s, 16)
-            _, res = struct.unpack('12sI', response)
-            return res
+            return (yield from self._pigpio_aio_command_ext_unlocked(cmd, p1, p2, p3, extents))
+
+    def _pigpio_aio_command_ext_unlocked(self, cmd, p1, p2, p3, extents):
+        """Run extended pigpio socket command without any lock."""
+        ext = bytearray(struct.pack('IIII', cmd, p1, p2, p3))
+        for x in extents:
+            if isinstance(x, str):
+                ext.extend(_b(x))
+            else:
+                ext.extend(x)
+        yield from self._loop.sock_sendall(self.s, ext)
+        response = yield from self._loop.sock_recv(self.s, 16)
+        _, res = struct.unpack('12sI', response)
+        return res
 
     @asyncio.coroutine
     def connect(self, address):
@@ -1052,6 +1056,51 @@ class Pi(object):
         """
         res = yield from self._pigpio_aio_command(_PI_CMD_SERVO, user_gpio, int(pulsewidth))
         return _u2i(res)
+
+    @asyncio.coroutine
+    def i2c_open(self, bus, address):
+        """Open an i2c device on a bus."""
+        res = yield from self._pigpio_aio_command(_PI_CMD_I2CO, int(bus), int(address))
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def i2c_close(self, handle):
+        """Close an i2c handle."""
+        res = yield from self._pigpio_aio_command(_PI_CMD_I2CC, handle)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def i2c_write_byte_data(self, handle, register, data):
+        """Write byte to i2c register on handle."""
+        extents = [struct.pack("I", data)]
+        res = yield from self._pigpio_aio_command_ext(_PI_CMD_I2CWB, handle, int(register), 4, extents)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def _rxbuf(self, count):
+        """"Returns count bytes from the command socket."""
+        ext = yield from self._loop.sock_recv(self.s, count)
+        while len(ext) < count:
+            ext.extend((yield from self._loop.sock_recv(self.s, count - len(ext))))
+        return ext
+
+    @asyncio.coroutine
+    def i2c_read_byte_data(self, handle, register):
+        """Write byte to i2c register on handle."""
+        res = yield from self._pigpio_aio_command(_PI_CMD_I2CRB, handle, int(register))
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def i2c_read_i2c_block_data(self, handle, register, count):
+        """Read count bytes from an i2c handle."""
+        extents = [struct.pack("I", count)]
+        with (yield from self._lock):
+            bytes = yield from self._pigpio_aio_command_ext_unlocked(_PI_CMD_I2CRI, handle, int(register), 4, extents)
+            if bytes > 0:
+                data = yield from self._rxbuf(count)
+            else:
+                data = ""
+        return data
 
     def __init__(self, loop=None):
         if loop is None:
