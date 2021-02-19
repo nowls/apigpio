@@ -991,6 +991,238 @@ class Pi(object):
         return _u2i(res)
 
     @asyncio.coroutine
+    def get_PWM_dutycycle(self, user_gpio):
+        """
+        Returns the PWM dutycycle being used on the GPIO.
+        user_gpio:= 0-31.
+        Returns the PWM dutycycle.
+        For normal PWM the dutycycle will be out of the defined range
+        for the GPIO (see [*get_PWM_range*]).
+        If a hardware clock is active on the GPIO the reported
+        dutycycle will be 500000 (500k) out of 1000000 (1M).
+        If hardware PWM is active on the GPIO the reported dutycycle
+        will be out of a 1000000 (1M).
+        ...
+        pi.set_PWM_dutycycle(4, 25)
+        print(pi.get_PWM_dutycycle(4))
+        25
+        pi.set_PWM_dutycycle(4, 203)
+        print(pi.get_PWM_dutycycle(4))
+        203
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_GDC, user_gpio, 0)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def set_PWM_range(self, user_gpio, range_):
+        """
+        Sets the range of PWM values to be used on the GPIO.
+        user_gpio:= 0-31.
+            range_:= 25-40000.
+        ...
+        pi.set_PWM_range(9, 100)  # now  25 1/4,   50 1/2,   75 3/4 on
+        pi.set_PWM_range(9, 500)  # now 125 1/4,  250 1/2,  375 3/4 on
+        pi.set_PWM_range(9, 3000) # now 750 1/4, 1500 1/2, 2250 3/4 on
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_PRS, user_gpio, range_)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def get_PWM_range(self, user_gpio):
+        """
+        Returns the range of PWM values being used on the GPIO.
+        user_gpio:= 0-31.
+        If a hardware clock or hardware PWM is active on the GPIO
+        the reported range will be 1000000 (1M).
+        ...
+        pi.set_PWM_range(9, 500)
+        print(pi.get_PWM_range(9))
+        500
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_PRG, user_gpio, 0)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def get_PWM_real_range(self, user_gpio):
+        """
+        Returns the real (underlying) range of PWM values being
+        used on the GPIO.
+        user_gpio:= 0-31.
+        If a hardware clock is active on the GPIO the reported
+        real range will be 1000000 (1M).
+        If hardware PWM is active on the GPIO the reported real range
+        will be approximately 250M divided by the set PWM frequency.
+        ...
+        pi.set_PWM_frequency(4, 800)
+        print(pi.get_PWM_real_range(4))
+        250
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_PRRG, user_gpio, 0)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def set_PWM_frequency(self, user_gpio, frequency):
+        """
+        Sets the frequency (in Hz) of the PWM to be used on the GPIO.
+        user_gpio:= 0-31.
+        frequency:= >=0 Hz
+        Returns the numerically closest frequency if OK, otherwise
+        PI_BAD_USER_GPIO or PI_NOT_PERMITTED.
+        If PWM is currently active on the GPIO it will be switched
+        off and then back on at the new frequency.
+        Each GPIO can be independently set to one of 18 different
+        PWM frequencies.
+        The selectable frequencies depend upon the sample rate which
+        may be 1, 2, 4, 5, 8, or 10 microseconds (default 5).  The
+        sample rate is set when the pigpio daemon is started.
+        The frequencies for each sample rate are:
+        . .
+                                Hertz
+                1: 40000 20000 10000 8000 5000 4000 2500 2000 1600
+                    1250  1000   800  500  400  250  200  100   50
+                2: 20000 10000  5000 4000 2500 2000 1250 1000  800
+                    625   500   400  250  200  125  100   50   25
+                4: 10000  5000  2500 2000 1250 1000  625  500  400
+                    313   250   200  125  100   63   50   25   13
+        sample
+        rate
+        (us)  5:  8000  4000  2000 1600 1000  800  500  400  320
+                    250   200   160  100   80   50   40   20   10
+                8:  5000  2500  1250 1000  625  500  313  250  200
+                    156   125   100   63   50   31   25   13    6
+            10:  4000  2000  1000  800  500  400  250  200  160
+                    125   100    80   50   40   25   20   10    5
+        . .
+        ...
+        pi.set_PWM_frequency(4,0)
+        print(pi.get_PWM_frequency(4))
+        10
+        pi.set_PWM_frequency(4,100000)
+        print(pi.get_PWM_frequency(4))
+        8000
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_PFS, user_gpio, frequency)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def get_PWM_frequency(self, user_gpio):
+        """
+        Returns the frequency of PWM being used on the GPIO.
+        user_gpio:= 0-31.
+        Returns the frequency (in Hz) used for the GPIO.
+        For normal PWM the frequency will be that defined for the GPIO
+        by [*set_PWM_frequency*].
+        If a hardware clock is active on the GPIO the reported frequency
+        will be that set by [*hardware_clock*].
+        If hardware PWM is active on the GPIO the reported frequency
+        will be that set by [*hardware_PWM*].
+        ...
+        pi.set_PWM_frequency(4,0)
+        print(pi.get_PWM_frequency(4))
+        10
+        pi.set_PWM_frequency(4, 800)
+        print(pi.get_PWM_frequency(4))
+        800
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_PFG, user_gpio, 0)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def hardware_clock(self, gpio, clkfreq):
+        """
+        Starts a hardware clock on a GPIO at the specified frequency.
+        Frequencies above 30MHz are unlikely to work.
+            gpio:= see description
+        clkfreq:= 0 (off) or 4689-250M (13184-375M for the BCM2711)
+        Returns 0 if OK, otherwise PI_NOT_PERMITTED, PI_BAD_GPIO,
+        PI_NOT_HCLK_GPIO, PI_BAD_HCLK_FREQ,or PI_BAD_HCLK_PASS.
+        The same clock is available on multiple GPIO.  The latest
+        frequency setting will be used by all GPIO which share a clock.
+        The GPIO must be one of the following:
+        . .
+        4   clock 0  All models
+        5   clock 1  All models but A and B (reserved for system use)
+        6   clock 2  All models but A and B
+        20  clock 0  All models but A and B
+        21  clock 1  All models but A and Rev.2 B (reserved for system use)
+        32  clock 0  Compute module only
+        34  clock 0  Compute module only
+        42  clock 1  Compute module only (reserved for system use)
+        43  clock 2  Compute module only
+        44  clock 1  Compute module only (reserved for system use)
+        . .
+        Access to clock 1 is protected by a password as its use will
+        likely crash the Pi.  The password is given by or'ing 0x5A000000
+        with the GPIO number.
+        ...
+        pi.hardware_clock(4, 5000) # 5 KHz clock on GPIO 4
+        pi.hardware_clock(4, 40000000) # 40 MHz clock on GPIO 4
+        ...
+        """
+        res = yield from self._pigpio_aio_command(_PI_CMD_HC, gpio, clkfreq)
+        return _u2i(res)
+
+    @asyncio.coroutine
+    def hardware_PWM(self, gpio, PWMfreq, PWMduty):
+        """
+        Starts hardware PWM on a GPIO at the specified frequency
+        and dutycycle. Frequencies above 30MHz are unlikely to work.
+        NOTE: Any waveform started by [*wave_send_once*],
+        [*wave_send_repeat*], or [*wave_chain*] will be cancelled.
+        This function is only valid if the pigpio main clock is PCM.
+        The main clock defaults to PCM but may be overridden when the
+        pigpio daemon is started (option -t).
+            gpio:= see descripton
+        PWMfreq:= 0 (off) or 1-125M (1-187.5M for the BCM2711).
+        PWMduty:= 0 (off) to 1000000 (1M)(fully on).
+        Returns 0 if OK, otherwise PI_NOT_PERMITTED, PI_BAD_GPIO,
+        PI_NOT_HPWM_GPIO, PI_BAD_HPWM_DUTY, PI_BAD_HPWM_FREQ.
+        The same PWM channel is available on multiple GPIO.
+        The latest frequency and dutycycle setting will be used
+        by all GPIO which share a PWM channel.
+        The GPIO must be one of the following:
+        . .
+        12  PWM channel 0  All models but A and B
+        13  PWM channel 1  All models but A and B
+        18  PWM channel 0  All models
+        19  PWM channel 1  All models but A and B
+        40  PWM channel 0  Compute module only
+        41  PWM channel 1  Compute module only
+        45  PWM channel 1  Compute module only
+        52  PWM channel 0  Compute module only
+        53  PWM channel 1  Compute module only
+        . .
+        The actual number of steps beween off and fully on is the
+        integral part of 250M/PWMfreq (375M/PWMfreq for the BCM2711).
+        The actual frequency set is 250M/steps (375M/steps
+        for the BCM2711).
+        There will only be a million steps for a PWMfreq of 250
+        (375 for the BCM2711). Lower frequencies will have more
+        steps and higher frequencies will have fewer steps.
+        PWMduty is automatically scaled to take this into account.
+        ...
+        pi.hardware_PWM(18, 800, 250000) # 800Hz 25% dutycycle
+        pi.hardware_PWM(18, 2000, 750000) # 2000Hz 75% dutycycle
+        ...
+        """
+        # pigpio message format
+
+        # I p1 gpio
+        # I p2 PWMfreq
+        # I p3 4
+        ## extension ##
+        # I PWMdutycycle
+        extents = [struct.pack("I", PWMduty)]
+        res = yield from self._pigpio_aio_command_ext(_PI_CMD_HP, gpio, PWMfreq, 4, extents)
+        return _u2i(res)
+    
+    @asyncio.coroutine
     def add_callback(self, user_gpio, edge=RISING_EDGE, func=None):
         """
         Calls a user supplied function (a callback) whenever the
