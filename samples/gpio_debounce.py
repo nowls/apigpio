@@ -19,20 +19,19 @@ class Blinker(object):
         self.led_gpio = gpio
         self.blink = False
 
-    @asyncio.coroutine
-    def start(self):
+    async def start(self):
         self.blink = True
         print('Start Blinking')
         is_on = True
         while self.blink:
             if is_on:
-                yield from self.pi.write(self.led_gpio, apigpio.ON)
+                await self.pi.write(self.led_gpio, apigpio.ON)
             else:
-                yield from self.pi.write(self.led_gpio, apigpio.OFF)
+                await self.pi.write(self.led_gpio, apigpio.OFF)
 
             is_on = not is_on
-            yield from asyncio.sleep(0.2)
-        yield from self.pi.write(self.led_gpio, apigpio.OFF)
+            await asyncio.sleep(0.2)
+        await self.pi.write(self.led_gpio, apigpio.OFF)
 
     def stop(self):
         self.blink = False
@@ -54,26 +53,25 @@ def on_bt(gpio, level, tick, blinker=None):
     blinker.toggle()
 
 
-@asyncio.coroutine
-def subscribe(pi):
+async def subscribe(pi):
 
-    yield from pi.set_mode(BT_GPIO, apigpio.INPUT)
-    yield from pi.set_mode(LED_GPIO, apigpio.OUTPUT)
+    await pi.set_mode(BT_GPIO, apigpio.INPUT)
+    await pi.set_mode(LED_GPIO, apigpio.OUTPUT)
 
     blinker = Blinker(pi, LED_GPIO)
 
     # functools.partial is usefull when your callback requires extra arguments:
     cb = functools.partial(on_bt, blinker=blinker)
-    yield from pi.add_callback(BT_GPIO, edge=apigpio.RISING_EDGE,
+    await pi.add_callback(BT_GPIO, edge=apigpio.RISING_EDGE,
                                func=cb)
 
 
-if __name__ == '__main__':
-
-    loop = asyncio.get_event_loop()
-    pi = apigpio.Pi(loop)
+async def main():
     address = ('192.168.1.3', 8888)
-    loop.run_until_complete(pi.connect(address))
-    loop.run_until_complete(subscribe(pi))
+    pi = apigpio.Pi()
+    await pi.connect(address)
+    await subscribe(pi)
+    asyncio.get_event_loop.run_forever()
 
-    loop.run_forever()
+if __name__ == '__main__':
+    asyncio.run(main())

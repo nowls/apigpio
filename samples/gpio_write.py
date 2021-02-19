@@ -3,23 +3,22 @@ import apigpio
 
 LED_GPIO = 21
 
+async def start_blink(pi, address):
+    await pi.connect(address)
 
-@asyncio.coroutine
-def start_blink(pi, address):
-    yield from pi.connect(address)
-
-    yield from pi.set_mode(LED_GPIO, apigpio.OUTPUT)
+    await pi.set_mode(LED_GPIO, apigpio.OUTPUT)
 
     while True:
-        yield from pi.write(LED_GPIO, 0)
-        yield from asyncio.sleep(1)
-        yield from pi.write(LED_GPIO, 1)
-        yield from asyncio.sleep(1)
+        await pi.write(LED_GPIO, 0)
+        await asyncio.sleep(1)
+        await pi.write(LED_GPIO, 1)
+        await asyncio.sleep(1)
 
-
-if __name__ == '__main__':
-
-    loop = asyncio.get_event_loop()
-    pi = apigpio.Pi(loop)
+async def main():
     address = ('192.168.1.3', 8888)
-    loop.run_until_complete(start_blink(pi, address))
+    pi = apigpio.Pi()
+    await pi.connect(address)
+    await start_blink(pi, address, LED_GPIO)
+ 
+if __name__ == '__main__':
+    asyncio.run(main())

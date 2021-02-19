@@ -375,9 +375,7 @@ class _callback_handler(object):
         self.f_stop = asyncio.Future(loop=self._loop)
         self.f_stopped = asyncio.Future(loop=self._loop)
 
-    @asyncio.coroutine
-    def _connect(self, address):
-
+    async def _connect(self, address):
         # FIXME: duplication with pi.connect
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # Disable the Nagle algorithm.
@@ -385,37 +383,34 @@ class _callback_handler(object):
         self.s.setblocking(False)
 
         # TODO: handle connection errors !
-        yield from self._loop.sock_connect(self.s, address)
-        self.handle = yield from self._pigpio_aio_command(_PI_CMD_NOIB, 0, 0)
+        await self._loop.sock_connect(self.s, address)
+        self.handle = await self._pigpio_aio_command(_PI_CMD_NOIB, 0, 0)
         asyncio.ensure_future(self._wait_for_notif(), loop=self._loop)
 
-    @asyncio.coroutine
-    def close(self):
+    async def close(self):
         if not self.f_stop.done():
-            self.handle = yield from self._pigpio_aio_command(_PI_CMD_NC,
+            self.handle = await self._pigpio_aio_command(_PI_CMD_NC,
                                                               self.handle, 0)
             self.f_stop.set_result(True)
-            yield from self.f_stopped
+            await self.f_stopped
 
-    @asyncio.coroutine
-    def _wait_for_notif(self):
-
+    async def _wait_for_notif(self):
         last_level = 0
 
         while True:
             MSG_SIZ = 12
             f_recv = self._loop.sock_recv(self.s, MSG_SIZ)
-            done, pending = yield from asyncio.\
+            done, pending = await asyncio.\
                 wait([f_recv, self.f_stop],
                      return_when=asyncio.FIRST_COMPLETED)
             if self.f_stop in done:
                 break
             else:
                 buf = f_recv.result()
-            # buf = yield from self._loop.sock_recv(self.s, MSG_SIZ)
+            # buf = await self._loop.sock_recv(self.s, MSG_SIZ)
 
             while len(buf) < MSG_SIZ:
-                yield from self._loop.sock_recv(self.s, MSG_SIZ-len(buf))
+                await self._loop.sock_recv(self.s, MSG_SIZ-len(buf))
 
             seq, flags, tick, level = (struct.unpack('HHII', buf))
             if flags == 0:
@@ -445,18 +440,16 @@ class _callback_handler(object):
                 #            cb.func(event, tick)
         self.s.close()
         self.f_stopped.set_result(True)
-
-    @asyncio.coroutine
-    def append(self, cb):
+    
+    async def append(self, cb):
         """Adds a callback."""
         self.callbacks.append(cb.callb)
         self.monitor = self.monitor | cb.callb.bit
 
-        yield from self.pi._pigpio_aio_command(_PI_CMD_NB, self.handle,
+        await self.pi._pigpio_aio_command(_PI_CMD_NB, self.handle,
                                                self.monitor)
-
-    @asyncio.coroutine
-    def remove(self, cb):
+    
+    async def remove(self, cb):
         """Removes a callback."""
         if cb in self.callbacks:
             self.callbacks.remove(cb)
@@ -465,18 +458,16 @@ class _callback_handler(object):
                 new_monitor |= c.bit
             if new_monitor != self.monitor:
                 self.monitor = new_monitor
-                yield from self.pi._pigpio_aio_command(
+                await self.pi._pigpio_aio_command(
                     _PI_CMD_NB, self.handle, self.monitor)
 
-    @asyncio.coroutine
-    def _pigpio_aio_command(self, cmd,  p1, p2,):
+    async def _pigpio_aio_command(self, cmd,  p1, p2,):
         # FIXME: duplication with pi._pigpio_aio_command
         data = struct.pack('IIII', cmd, p1, p2, 0)
-        yield from self._loop.sock_sendall(self.s, data)
-        response = yield from self._loop.sock_recv(self.s, 16)
+        await self._loop.sock_sendall(self.s, data)
+        response = await self._loop.sock_recv(self.s, 16)
         _, res = struct.unpack('12sI', response)
         return res
-
 
 class Callback:
     """A class to provide gpio level change callbacks."""
@@ -490,12 +481,11 @@ class Callback:
         if func is None:
             func = self._tally
         self.callb = _callback_ADT(user_gpio, edge, func)
-        # FIXME yield from self._notify.append(self.callb)
-
-    @asyncio.coroutine
-    def cancel(self):
+        # FIXME await self._notify.append(self.callb)
+    
+    async def cancel(self):
         """Cancels a callback by removing it from the notification thread."""
-        yield from self._notify.remove(self.callb)
+        await self._notify.remove(self.callb)
 
     def _tally(self, user_gpio, level, tick):
         """Increment the callback called count."""
@@ -513,9 +503,8 @@ class Callback:
 
 
 class Pi(object):
-
-    @asyncio.coroutine
-    def _pigpio_aio_command(self, cmd,  p1, p2,):
+    
+    async def _pigpio_aio_command(self, cmd,  p1, p2,):
         """
         Runs a pigpio socket command.
 
@@ -524,15 +513,14 @@ class Pi(object):
         p1:= command parameter 1 (if applicable).
          p2:=  command parameter 2 (if applicable).
         """
-        with (yield from self._lock):
+        with (await self._lock):
             data = struct.pack('IIII', cmd, p1, p2, 0)
-            yield from self._loop.sock_sendall(self.s, data)
-            response = yield from self._loop.sock_recv(self.s, 16)
+            await self._loop.sock_sendall(self.s, data)
+            response = await self._loop.sock_recv(self.s, 16)
             _, res = struct.unpack('12sI', response)
             return res
-
-    @asyncio.coroutine
-    def _pigpio_aio_command_ext(self, cmd, p1, p2, p3, extents):
+    
+    async def _pigpio_aio_command_ext(self, cmd, p1, p2, p3, extents):
         """
         Runs an extended pigpio socket command.
 
@@ -543,10 +531,10 @@ class Pi(object):
             p3:= total size in bytes of following extents
         extents:= additional data blocks
         """
-        with (yield from self._lock):
-            return (yield from self._pigpio_aio_command_ext_unlocked(cmd, p1, p2, p3, extents))
+        with (await self._lock):
+            return (await self._pigpio_aio_command_ext_unlocked(cmd, p1, p2, p3, extents))
 
-    def _pigpio_aio_command_ext_unlocked(self, cmd, p1, p2, p3, extents):
+    async def _pigpio_aio_command_ext_unlocked(self, cmd, p1, p2, p3, extents):
         """Run extended pigpio socket command without any lock."""
         ext = bytearray(struct.pack('IIII', cmd, p1, p2, p3))
         for x in extents:
@@ -554,13 +542,12 @@ class Pi(object):
                 ext.extend(_b(x))
             else:
                 ext.extend(x)
-        yield from self._loop.sock_sendall(self.s, ext)
-        response = yield from self._loop.sock_recv(self.s, 16)
+        await self._loop.sock_sendall(self.s, ext)
+        response = await self._loop.sock_recv(self.s, 16)
         _, res = struct.unpack('12sI', response)
         return res
-
-    @asyncio.coroutine
-    def connect(self, address):
+    
+    async def connect(self, address):
         """
         Connect to a remote or local gpiod daemon.
         :param address: a pair (address, port), the address must be already
@@ -572,28 +559,25 @@ class Pi(object):
         # Disable the Nagle algorithm.
         self.s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-        yield from self._loop.sock_connect(self.s, address)
+        await self._loop.sock_connect(self.s, address)
 
-        yield from self._notify._connect(address)
-
-    @asyncio.coroutine
-    def stop(self):
+        await self._notify._connect(address)
+    
+    async def stop(self):
         """
 
         :return:
         """
         print('closing notifier')
-        yield from self._notify.close()
+        await self._notify.close()
         print('closing socket')
         self.s.close()
-
-    @asyncio.coroutine
-    def get_version(self):
-        res = yield from self._pigpio_aio_command(_PI_CMD_PIGPV)
+    
+    async def get_version(self):
+        res = await self._pigpio_aio_command(_PI_CMD_PIGPV)
         print('version: {}'.format(res))
 
-    @asyncio.coroutine
-    def get_pigpio_version(self):
+    async def get_pigpio_version(self):
         """
         Returns the pigpio software version.
 
@@ -601,10 +585,9 @@ class Pi(object):
         v = pi.get_pigpio_version()
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PIGPV, 0, 0)
-
-    @asyncio.coroutine
-    def store_script(self, script):
+        res = await self._pigpio_aio_command(_PI_CMD_PIGPV, 0, 0)
+    
+    async def store_script(self, script):
         """
         Store a script for later execution.
 
@@ -618,15 +601,14 @@ class Pi(object):
         ...
         """
         if len(script):
-            res = yield from self._pigpio_aio_command_ext(_PI_CMD_PROC, 0, 0,
+            res = await self._pigpio_aio_command_ext(_PI_CMD_PROC, 0, 0,
                                                           len(script),
                                                           [script])
             return _u2i(res)
         else:
             return 0
-
-    @asyncio.coroutine
-    def run_script(self, script_id, params=None):
+    
+    async def run_script(self, script_id, params=None):
         """
         Runs a stored script.
 
@@ -655,12 +637,11 @@ class Pi(object):
         else:
             nump = 0
             extents = []
-        res = yield from self._pigpio_aio_command_ext(_PI_CMD_PROCR, script_id,
+        res = await self._pigpio_aio_command_ext(_PI_CMD_PROCR, script_id,
                                                       0, nump * 4, extents)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def script_status(self, script_id):
+    
+    async def script_status(self, script_id):
         """
         Returns the run status of a stored script as well as the
         current values of parameters 0 to 9.
@@ -685,16 +666,16 @@ class Pi(object):
         (s, pars) = pi.script_status(sid)
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PROCP, script_id, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PROCP, script_id, 0)
         bytes = u2i(res)
 
         if bytes > 0:
 
             # Fixme : this sould be the same a _rxbuf
             # data = self._rxbuf(bytes)
-            data = yield from self._loop.sock_recv(self.s, bytes)
+            data = await self._loop.sock_recv(self.s, bytes)
             while len(data) < bytes:
-                b = yield from self._loop.sock_recv(self.s, bytes-len(data))
+                b = await self._loop.sock_recv(self.s, bytes-len(data))
                 data.extend(b)
 
             pars = struct.unpack('11i', _str(data))
@@ -704,9 +685,8 @@ class Pi(object):
             status = bytes
             params = ()
         return status, params
-
-    @asyncio.coroutine
-    def stop_script(self, script_id):
+    
+    async def stop_script(self, script_id):
         """
         Stops a running script.
 
@@ -716,11 +696,10 @@ class Pi(object):
         status = pi.stop_script(sid)
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PROCS, script_id, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PROCS, script_id, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def delete_script(self, script_id):
+    
+    async def delete_script(self, script_id):
         """
         Deletes a stored script.
 
@@ -730,11 +709,10 @@ class Pi(object):
         status = pi.delete_script(sid)
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PROCD, script_id, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PROCD, script_id, 0)
         return _u2i(res)
 
-    @asyncio.coroutine
-    def read_bank_1(self):
+    async def read_bank_1(self):
         """
         Returns the levels of the bank 1 gpios (gpios 0-31).
 
@@ -746,11 +724,10 @@ class Pi(object):
         0b10010100000011100100001001111
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_BR1, 0, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_BR1, 0, 0)
         return res
 
-    @asyncio.coroutine
-    def clear_bank_1(self, bits):
+    async def clear_bank_1(self, bits):
         """
         Clears gpios 0-31 if the corresponding bit in bits is set.
 
@@ -764,11 +741,10 @@ class Pi(object):
         pi.clear_bank_1(int("111110010000",2))
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_BC1, bits, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_BC1, bits, 0)
         return _u2i(res)
 
-    @asyncio.coroutine
-    def set_bank_1(self, bits):
+    async def set_bank_1(self, bits):
         """
         Sets gpios 0-31 if the corresponding bit in bits is set.
 
@@ -782,11 +758,10 @@ class Pi(object):
         pi.set_bank_1(int("111110010000",2))
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_BS1, bits, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_BS1, bits, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_mode(self, gpio, mode):
+ 
+    async def set_mode(self, gpio, mode):
         """
         Sets the gpio mode.
 
@@ -799,26 +774,24 @@ class Pi(object):
         pi.set_mode(24, apigpio.ALT2)   # gpio 24 as ALT2
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_MODES, gpio, mode)
+        res = await self._pigpio_aio_command(_PI_CMD_MODES, gpio, mode)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_pull_up_down(self, gpio, pud):
+    
+    async def set_pull_up_down(self, gpio, pud):
         """
         Sets or clears the internal GPIO pull-up/down resistor.
         gpio:= 0-53.
          pud:= PUD_UP, PUD_DOWN, PUD_OFF.
         ...
-        yield from pi.set_pull_up_down(17, apigpio.PUD_OFF)
-        yield from pi.set_pull_up_down(23, apigpio.PUD_UP)
-        yield from pi.set_pull_up_down(24, apigpio.PUD_DOWN)
+        await pi.set_pull_up_down(17, apigpio.PUD_OFF)
+        await pi.set_pull_up_down(23, apigpio.PUD_UP)
+        await pi.set_pull_up_down(24, apigpio.PUD_DOWN)
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PUD, gpio, pud)
+        res = await self._pigpio_aio_command(_PI_CMD_PUD, gpio, pud)
         return _u2i(res)
 
-    @asyncio.coroutine
-    def get_mode(self, gpio):
+    async def get_mode(self, gpio):
         """
         Returns the gpio mode.
 
@@ -842,11 +815,10 @@ class Pi(object):
         4
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_MODEG, gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_MODEG, gpio, 0)
         return _u2i(res)
 
-    @asyncio.coroutine
-    def write(self, gpio, level):
+    async def write(self, gpio, level):
         """
         Sets the gpio level.
 
@@ -868,29 +840,27 @@ class Pi(object):
         1
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_WRITE, gpio, level)
+        res = await self._pigpio_aio_command(_PI_CMD_WRITE, gpio, level)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def read(self, gpio):
+    
+    async def read(self, gpio):
         """
         Returns the GPIO level.
         gpio:= 0-53.
         ...
-        yield from pi.set_mode(23, pigpio.INPUT)
-        yield from pi.set_pull_up_down(23, pigpio.PUD_DOWN)
-        print(yield from pi.read(23))
+        await pi.set_mode(23, pigpio.INPUT)
+        await pi.set_pull_up_down(23, pigpio.PUD_DOWN)
+        print(await pi.read(23))
         0
-        yield from pi.set_pull_up_down(23, pigpio.PUD_UP)
-        print(yield from pi.read(23))
+        await pi.set_pull_up_down(23, pigpio.PUD_UP)
+        print(await pi.read(23))
         1
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_READ, gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_READ, gpio, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def gpio_trigger(self, user_gpio, pulse_len=10, level=1):
+    
+    async def gpio_trigger(self, user_gpio, pulse_len=10, level=1):
         """
         Send a trigger pulse to a GPIO.  The GPIO is set to
         level for pulse_len microseconds and then reset to not level.
@@ -909,12 +879,11 @@ class Pi(object):
         ## extension ##
         # I level
         extents = [struct.pack("I", level)]
-        res = yield from self._pigpio_aio_command_ext(_PI_CMD_TRIG, user_gpio,
+        res = await self._pigpio_aio_command_ext(_PI_CMD_TRIG, user_gpio,
                                                       pulse_len, 4, extents)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_glitch_filter(self, user_gpio, steady):
+  
+    async def set_glitch_filter(self, user_gpio, steady):
         """
         Sets a glitch filter on a GPIO.
         Level changes on the GPIO are not reported unless the level
@@ -934,11 +903,10 @@ class Pi(object):
         pi.set_glitch_filter(23, 100)
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_FG, user_gpio, steady)
+        res = await self._pigpio_aio_command(_PI_CMD_FG, user_gpio, steady)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_noise_filter(self, user_gpio, steady, active):
+  
+    async def set_noise_filter(self, user_gpio, steady, active):
         """
         Sets a noise filter on a GPIO.
         Level changes on the GPIO are ignored until a level which has
@@ -968,12 +936,11 @@ class Pi(object):
         ## extension ##
         # I active
         extents = [struct.pack("I", active)]
-        res = yield from self._pigpio_aio_command_ext(_PI_CMD_FN, user_gpio,
+        res = await self._pigpio_aio_command_ext(_PI_CMD_FN, user_gpio,
                                                       steady, 4, extents)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_PWM_dutycycle(self, user_gpio, dutycycle):
+ 
+    async def set_PWM_dutycycle(self, user_gpio, dutycycle):
         """
         Starts (non-zero dutycycle) or stops (0) PWM pulses on the GPIO.
         user_gpio:= 0-31.
@@ -987,11 +954,10 @@ class Pi(object):
         pi.set_PWM_dutycycle(4, 255) # PWM full on
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PWM, user_gpio, int(dutycycle))
+        res = await self._pigpio_aio_command(_PI_CMD_PWM, user_gpio, int(dutycycle))
         return _u2i(res)
-
-    @asyncio.coroutine
-    def get_PWM_dutycycle(self, user_gpio):
+    
+    async def get_PWM_dutycycle(self, user_gpio):
         """
         Returns the PWM dutycycle being used on the GPIO.
         user_gpio:= 0-31.
@@ -1011,11 +977,10 @@ class Pi(object):
         203
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_GDC, user_gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_GDC, user_gpio, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_PWM_range(self, user_gpio, range_):
+    
+    async def set_PWM_range(self, user_gpio, range_):
         """
         Sets the range of PWM values to be used on the GPIO.
         user_gpio:= 0-31.
@@ -1026,11 +991,10 @@ class Pi(object):
         pi.set_PWM_range(9, 3000) # now 750 1/4, 1500 1/2, 2250 3/4 on
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PRS, user_gpio, range_)
+        res = await self._pigpio_aio_command(_PI_CMD_PRS, user_gpio, range_)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def get_PWM_range(self, user_gpio):
+   
+    async def get_PWM_range(self, user_gpio):
         """
         Returns the range of PWM values being used on the GPIO.
         user_gpio:= 0-31.
@@ -1042,11 +1006,10 @@ class Pi(object):
         500
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PRG, user_gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PRG, user_gpio, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def get_PWM_real_range(self, user_gpio):
+   
+    async def get_PWM_real_range(self, user_gpio):
         """
         Returns the real (underlying) range of PWM values being
         used on the GPIO.
@@ -1061,11 +1024,10 @@ class Pi(object):
         250
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PRRG, user_gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PRRG, user_gpio, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def set_PWM_frequency(self, user_gpio, frequency):
+   
+    async def set_PWM_frequency(self, user_gpio, frequency):
         """
         Sets the frequency (in Hz) of the PWM to be used on the GPIO.
         user_gpio:= 0-31.
@@ -1106,11 +1068,10 @@ class Pi(object):
         8000
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PFS, user_gpio, frequency)
+        res = await self._pigpio_aio_command(_PI_CMD_PFS, user_gpio, frequency)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def get_PWM_frequency(self, user_gpio):
+  
+    async def get_PWM_frequency(self, user_gpio):
         """
         Returns the frequency of PWM being used on the GPIO.
         user_gpio:= 0-31.
@@ -1130,11 +1091,10 @@ class Pi(object):
         800
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_PFG, user_gpio, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_PFG, user_gpio, 0)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def hardware_clock(self, gpio, clkfreq):
+   
+    async def hardware_clock(self, gpio, clkfreq):
         """
         Starts a hardware clock on a GPIO at the specified frequency.
         Frequencies above 30MHz are unlikely to work.
@@ -1165,11 +1125,10 @@ class Pi(object):
         pi.hardware_clock(4, 40000000) # 40 MHz clock on GPIO 4
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_HC, gpio, clkfreq)
+        res = await self._pigpio_aio_command(_PI_CMD_HC, gpio, clkfreq)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def hardware_PWM(self, gpio, PWMfreq, PWMduty):
+    
+    async def hardware_PWM(self, gpio, PWMfreq, PWMduty):
         """
         Starts hardware PWM on a GPIO at the specified frequency
         and dutycycle. Frequencies above 30MHz are unlikely to work.
@@ -1219,11 +1178,10 @@ class Pi(object):
         ## extension ##
         # I PWMdutycycle
         extents = [struct.pack("I", PWMduty)]
-        res = yield from self._pigpio_aio_command_ext(_PI_CMD_HP, gpio, PWMfreq, 4, extents)
-        return _u2i(res)
+        res = await self._pigpio_aio_command_ext(_PI_CMD_HP, gpio, PWMfreq, 4, extents)
+        return _u2i(res)   
     
-    @asyncio.coroutine
-    def add_callback(self, user_gpio, edge=RISING_EDGE, func=None):
+    async def add_callback(self, user_gpio, edge=RISING_EDGE, func=None):
         """
         Calls a user supplied function (a callback) whenever the
         specified gpio edge is detected.
@@ -1261,12 +1219,11 @@ class Pi(object):
         """
 
         cb = Callback(self._notify, user_gpio, edge, func)
-        yield from self._notify.append(cb)
+        await self._notify.append(cb)
 
         return cb
-
-    @asyncio.coroutine
-    def set_servo_pulsewidth(self, user_gpio, pulsewidth):
+    
+    async def set_servo_pulsewidth(self, user_gpio, pulsewidth):
         """
         Starts (500-2500) or stops (0) servo pulses on the GPIO.
          user_gpio:= 0-31.
@@ -1280,56 +1237,50 @@ class Pi(object):
         You can DAMAGE a servo if you command it to move beyond its
         limits.
         ...
-        yield from pi.set_servo_pulsewidth(17, 0)    # off
-        yield from pi.set_servo_pulsewidth(17, 1000) # safe anti-clockwise
-        yield from pi.set_servo_pulsewidth(17, 1500) # centre
-        yield from pi.set_servo_pulsewidth(17, 2000) # safe clockwise
+        await pi.set_servo_pulsewidth(17, 0)    # off
+        await pi.set_servo_pulsewidth(17, 1000) # safe anti-clockwise
+        await pi.set_servo_pulsewidth(17, 1500) # centre
+        await pi.set_servo_pulsewidth(17, 2000) # safe clockwise
         ...
         """
-        res = yield from self._pigpio_aio_command(_PI_CMD_SERVO, user_gpio, int(pulsewidth))
+        res = await self._pigpio_aio_command(_PI_CMD_SERVO, user_gpio, int(pulsewidth))
         return _u2i(res)
-
-    @asyncio.coroutine
-    def i2c_open(self, bus, address):
+    
+    async def i2c_open(self, bus, address):
         """Open an i2c device on a bus."""
-        res = yield from self._pigpio_aio_command(_PI_CMD_I2CO, int(bus), int(address))
+        res = await self._pigpio_aio_command(_PI_CMD_I2CO, int(bus), int(address))
         return _u2i(res)
-
-    @asyncio.coroutine
-    def i2c_close(self, handle):
+    
+    async def i2c_close(self, handle):
         """Close an i2c handle."""
-        res = yield from self._pigpio_aio_command(_PI_CMD_I2CC, handle)
+        res = await self._pigpio_aio_command(_PI_CMD_I2CC, handle)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def i2c_write_byte_data(self, handle, register, data):
+   
+    async def i2c_write_byte_data(self, handle, register, data):
         """Write byte to i2c register on handle."""
         extents = [struct.pack("I", data)]
-        res = yield from self._pigpio_aio_command_ext(_PI_CMD_I2CWB, handle, int(register), 4, extents)
+        res = await self._pigpio_aio_command_ext(_PI_CMD_I2CWB, handle, int(register), 4, extents)
         return _u2i(res)
-
-    @asyncio.coroutine
-    def _rxbuf(self, count):
+   
+    async def _rxbuf(self, count):
         """"Returns count bytes from the command socket."""
-        ext = yield from self._loop.sock_recv(self.s, count)
+        ext = await self._loop.sock_recv(self.s, count)
         while len(ext) < count:
-            ext.extend((yield from self._loop.sock_recv(self.s, count - len(ext))))
+            ext.extend((await self._loop.sock_recv(self.s, count - len(ext))))
         return ext
-
-    @asyncio.coroutine
-    def i2c_read_byte_data(self, handle, register):
+    
+    async def i2c_read_byte_data(self, handle, register):
         """Write byte to i2c register on handle."""
-        res = yield from self._pigpio_aio_command(_PI_CMD_I2CRB, handle, int(register))
+        res = await self._pigpio_aio_command(_PI_CMD_I2CRB, handle, int(register))
         return _u2i(res)
-
-    @asyncio.coroutine
-    def i2c_read_i2c_block_data(self, handle, register, count):
+   
+    async def i2c_read_i2c_block_data(self, handle, register, count):
         """Read count bytes from an i2c handle."""
         extents = [struct.pack("I", count)]
-        with (yield from self._lock):
-            bytes = yield from self._pigpio_aio_command_ext_unlocked(_PI_CMD_I2CRI, handle, int(register), 4, extents)
+        with (await self._lock):
+            bytes = await self._pigpio_aio_command_ext_unlocked(_PI_CMD_I2CRI, handle, int(register), 4, extents)
             if bytes > 0:
-                data = yield from self._rxbuf(count)
+                data = await self._rxbuf(count)
             else:
                 data = ""
         return data
