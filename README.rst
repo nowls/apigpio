@@ -3,8 +3,10 @@ apigpio
 
 apigpio - an asyncio-based python client for pigpio
 
-Forked from https://github.com/PierreRust/apigpio because it is kind of unmaintained.
-We added some more feature (I2C) and fixed Python 3.7 support.
+Forked from https://github.com/missionpinball to add support for a few more useful PWM related functions
+
+Originally forked from https://github.com/PierreRust/apigpio by missionpinball because it is kind of unmaintained.
+They added some more feature (I2C) and fixed Python 3.7 support.
 
 `pigpio <http://abyz.co.uk/rpi/pigpio/pigpiod.html>`_ provides a very 
 convenient `pigpiod` daemon which can be used through a pipe or socket interface
@@ -16,15 +18,13 @@ daemon. It's basically a (incomplete) port of the original python client provide
 Installation
 ============
 
-apigpio is available on Pypi and can be installed with pip::
-
-  pip install apigpio-mpf
+Not yet on Pypi or available from pip
 
 To install it from sources:
  
 ::
 
-  git clone https://github.com/missionpinball/apigpio.git
+  git clone https://github.com/neildavis/apigpio.git
   cd apigpio
   python setup.py install
     

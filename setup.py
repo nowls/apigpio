@@ -5,8 +5,8 @@ with open('README.rst', 'r') as f:
     README = f.read()
 
 
-setup(name='apigpio-mpf',
-      version='0.0.3',
+setup(name='apigpio-nad',
+      version='0.0.4',
       description='asyncio-based python client for pigpiod',
       long_description=README,
       classifiers=[
@@ -25,7 +25,7 @@ setup(name='apigpio-mpf',
       ],
       author='Pierre Rust',
       author_email='pierre.rust@gmail.com',
-      url='https://github.com/missionpinball/apigpio',
+      url='https://github.com/neildavis/apigpio',
       keywords=['gpio', 'pigpio', 'asyncio', 'raspberry'],
       packages=find_packages()
       )
