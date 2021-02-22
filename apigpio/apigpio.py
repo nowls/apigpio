@@ -375,7 +375,7 @@ class _callback_handler(object):
 
         while True:
             MSG_SIZ = 12
-            f_recv = self._loop.sock_recv(self.s, MSG_SIZ)
+            f_recv = asyncio.ensure_future(self._loop.sock_recv(self.s, MSG_SIZ))
             done, pending = await asyncio.\
                 wait([f_recv, self.f_stop],
                      return_when=asyncio.FIRST_COMPLETED)
