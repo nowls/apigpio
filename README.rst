@@ -26,7 +26,7 @@ To install it from sources:
 
   git clone https://github.com/neildavis/apigpio.git
   cd apigpio
-  python setup.py install
+  python3 -m pip install .
     
     
 Usage
