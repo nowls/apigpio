@@ -489,7 +489,7 @@ class Pi(object):
         p1:= command parameter 1 (if applicable).
          p2:=  command parameter 2 (if applicable).
         """
-        with (await self._lock):
+        async with self._lock:
             data = struct.pack('IIII', cmd, p1, p2, 0)
             await self._loop.sock_sendall(self.s, data)
             response = await self._loop.sock_recv(self.s, 16)
@@ -507,7 +507,7 @@ class Pi(object):
             p3:= total size in bytes of following extents
         extents:= additional data blocks
         """
-        with (await self._lock):
+        async with self._lock:
             return (await self._pigpio_aio_command_ext_unlocked(cmd, p1, p2, p3, extents))
 
     async def _pigpio_aio_command_ext_unlocked(self, cmd, p1, p2, p3, extents):
@@ -1253,7 +1253,7 @@ class Pi(object):
     async def i2c_read_i2c_block_data(self, handle, register, count):
         """Read count bytes from an i2c handle."""
         extents = [struct.pack("I", count)]
-        with (await self._lock):
+        async with self._lock:
             bytes = await self._pigpio_aio_command_ext_unlocked(_PI_CMD_I2CRI, handle, int(register), 4, extents)
             if bytes > 0:
                 data = await self._rxbuf(count)
