@@ -1,7 +1,7 @@
 import functools
 
 
-def Debounce(threshold=100):
+def Debounce(threshold=100, print_status=True):
     """
     Simple debouncing decorator for apigpio callbacks.
 
@@ -40,10 +40,11 @@ def Debounce(threshold=100):
                 delay = tick - self.last
             if delay > threshold:
                 self._fn(*args, **kwargs)
-                print('call passed by debouncer {} {} {}'
-                      .format(tick, self.last, threshold))
+                if print_status:
+                    print('call passed by debouncer {} {} {}'
+                      .format(tick, self.last, threshold)) 
                 self.last = tick
-            else:
+            elif print_status:
                 print('call filtered out by debouncer {} {} {}'
                       .format(tick, self.last, threshold))
 
