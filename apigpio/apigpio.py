@@ -1198,6 +1198,128 @@ class Pi(object):
         await self._notify.append(cb)
 
         return cb
+
+    async def notify_open(self):
+        """
+        Returns a notification handle (>=0).
+
+        A notification is a method for being notified of GPIO state
+        changes via a pipe.
+
+        Pipes are only accessible from the local machine so this
+        function serves no purpose if you are using Python from a
+        remote machine.  The in-built (socket) notifications
+        provided by [*callback*] should be used instead.
+
+        Notifications for handle x will be available at the pipe
+        named /dev/pigpiox (where x is the handle number).
+
+        E.g. if the function returns 15 then the notifications must be
+        read from /dev/pigpio15.
+
+        Notifications have the following structure:
+
+        . .
+        H seqno
+        H flags
+        I tick
+        I level
+        . .
+
+        seqno: starts at 0 each time the handle is opened and then
+        increments by one for each report.
+
+        flags: three flags are defined, PI_NTFY_FLAGS_WDOG,
+        PI_NTFY_FLAGS_ALIVE, and PI_NTFY_FLAGS_EVENT.
+
+        If bit 5 is set (PI_NTFY_FLAGS_WDOG) then bits 0-4 of the
+        flags indicate a GPIO which has had a watchdog timeout.
+
+        If bit 6 is set (PI_NTFY_FLAGS_ALIVE) this indicates a keep
+        alive signal on the pipe/socket and is sent once a minute
+        in the absence of other notification activity.
+
+        If bit 7 is set (PI_NTFY_FLAGS_EVENT) then bits 0-4 of the
+        flags indicate an event which has been triggered.
+
+
+        tick: the number of microseconds since system boot.  It wraps
+        around after 1h12m.
+
+        level: indicates the level of each GPIO.  If bit 1<<x is set
+        then GPIO x is high.
+
+        ...
+        h = pi.notify_open()
+        if h >= 0:
+            pi.notify_begin(h, 1234)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_NO, 0, 0)
+        return _u2i(res)
+
+    async def notify_begin(self, handle, bits):
+        """
+        Starts notifications on a handle.
+
+        handle:= >=0 (as returned by a prior call to [*notify_open*])
+        bits:= a 32 bit mask indicating the GPIO to be notified.
+
+        The notification sends state changes for each GPIO whose
+        corresponding bit in bits is set.
+
+        The following code starts notifications for GPIO 1, 4,
+        6, 7, and 10 (1234 = 0x04D2 = 0b0000010011010010).
+
+        ...
+        h = pi.notify_open()
+        if h >= 0:
+            pi.notify_begin(h, 1234)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_NB, handle, bits)
+        return _u2i(res)
+ 
+    async def notify_pause(self, handle):
+        """
+        Pauses notifications on a handle.
+
+        handle:= >=0 (as returned by a prior call to [*notify_open*])
+
+        Notifications for the handle are suspended until
+        [*notify_begin*] is called again.
+
+        ...
+        h = pi.notify_open()
+        if h >= 0:
+            pi.notify_begin(h, 1234)
+            ...
+            pi.notify_pause(h)
+            ...
+            pi.notify_begin(h, 1234)
+            ...
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_NP, handle, 0)
+        return _u2i(res)
+
+    async def notify_close(self, handle):
+        """
+        Stops notifications on a handle and releases the handle for reuse.
+
+        handle:= >=0 (as returned by a prior call to [*notify_open*])
+
+        ...
+        h = pi.notify_open()
+        if h >= 0:
+            pi.notify_begin(h, 1234)
+            ...
+            pi.notify_close(h)
+            ...
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_NC, handle, 0)
+        return _u2i(res)
     
     async def set_servo_pulsewidth(self, user_gpio, pulsewidth):
         """
