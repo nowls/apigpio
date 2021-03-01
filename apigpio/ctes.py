@@ -44,6 +44,7 @@ PI_SCRIPT_FAILED = 4
 
 # notification flags
 
+NTFY_FLAGS_EVENT = (1 << 7)
 NTFY_FLAGS_ALIVE = (1 << 6)
 NTFY_FLAGS_WDOG = (1 << 5)
 NTFY_FLAGS_GPIO = 31
