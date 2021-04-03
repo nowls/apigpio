@@ -6,7 +6,7 @@ with open('README.rst', 'r') as f:
 
 
 setup(name='apigpio-nad',
-      version='0.0.5',
+      version='0.0.6',
       description='asyncio-based python client for pigpiod',
       long_description=README,
       classifiers=[
