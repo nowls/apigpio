@@ -260,6 +260,23 @@ class ApigpioError(Exception):
     def __str__(self):
         return repr(self.value)
 
+class Pulse:
+   """
+   A class to store pulse information.
+   """
+
+   def __init__(self, gpio_on, gpio_off, delay):
+      """
+      Initialises a pulse.
+
+       gpio_on:= the GPIO to switch on at the start of the pulse.
+      gpio_off:= the GPIO to switch off at the start of the pulse.
+         delay:= the delay in microseconds before the next pulse.
+
+      """
+      self.gpio_on = gpio_on
+      self.gpio_off = gpio_off
+      self.delay = delay
 
 def error_text(errnum):
     """
@@ -1553,7 +1570,7 @@ class Pi(object):
         wid = pi.wave_create()
         ...
         """
-        res = await self._pigpio_aio_command(self.sl, _PI_CMD_WVCRE, 0, 0)
+        res = await self._pigpio_aio_command(_PI_CMD_WVCRE, 0, 0)
         return _u2i(res)
 
     async def wave_create_and_pad(self, percent):
