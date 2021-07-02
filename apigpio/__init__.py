@@ -1,3 +1,3 @@
 from .ctes import *
-from .apigpio import Pi
+from .apigpio import Pi, Pulse
 from .utils import Debounce

@@ -260,6 +260,23 @@ class ApigpioError(Exception):
     def __str__(self):
         return repr(self.value)
 
+class Pulse:
+   """
+   A class to store pulse information.
+   """
+
+   def __init__(self, gpio_on, gpio_off, delay):
+      """
+      Initialises a pulse.
+
+       gpio_on:= the GPIO to switch on at the start of the pulse.
+      gpio_off:= the GPIO to switch off at the start of the pulse.
+         delay:= the delay in microseconds before the next pulse.
+
+      """
+      self.gpio_on = gpio_on
+      self.gpio_off = gpio_off
+      self.delay = delay
 
 def error_text(errnum):
     """
@@ -1344,6 +1361,600 @@ class Pi(object):
         res = await self._pigpio_aio_command(_PI_CMD_SERVO, user_gpio, int(pulsewidth))
         return _u2i(res)
     
+    async def wave_clear(self):
+        """
+        Clears all waveforms and any data added by calls to the
+        [*wave_add_**] functions.
+
+        ...
+        pi.wave_clear()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVCLR, 0, 0)
+        return _u2i(res)
+
+    async def wave_add_new(self):
+        """
+        Starts a new empty waveform.
+
+        You would not normally need to call this function as it is
+        automatically called after a waveform is created with the
+        [*wave_create*] function.
+
+        ...
+        pi.wave_add_new()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVNEW, 0, 0)
+        return _u2i(res)
+
+    async def wave_add_generic(self, pulses):
+        """
+        Adds a list of pulses to the current waveform.
+
+        pulses:= list of pulses to add to the waveform.
+
+        Returns the new total number of pulses in the current waveform.
+
+        The pulses are interleaved in time order within the existing
+        waveform (if any).
+
+        Merging allows the waveform to be built in parts, that is the
+        settings for GPIO#1 can be added, and then GPIO#2 etc.
+
+        If the added waveform is intended to start after or within
+        the existing waveform then the first pulse should consist
+        solely of a delay.
+
+        ...
+        G1=4
+        G2=24
+
+        pi.set_mode(G1, pigpio.OUTPUT)
+        pi.set_mode(G2, pigpio.OUTPUT)
+
+        flash_500=[] # flash every 500 ms
+        flash_100=[] # flash every 100 ms
+
+        #                              ON     OFF  DELAY
+
+        flash_500.append(pigpio.pulse(1<<G1, 1<<G2, 500000))
+        flash_500.append(pigpio.pulse(1<<G2, 1<<G1, 500000))
+
+        flash_100.append(pigpio.pulse(1<<G1, 1<<G2, 100000))
+        flash_100.append(pigpio.pulse(1<<G2, 1<<G1, 100000))
+
+        pi.wave_clear() # clear any existing waveforms
+
+        pi.wave_add_generic(flash_500) # 500 ms flashes
+        f500 = pi.wave_create() # create and save id
+
+        pi.wave_add_generic(flash_100) # 100 ms flashes
+        f100 = pi.wave_create() # create and save id
+
+        pi.wave_send_repeat(f500)
+
+        time.sleep(4)
+
+        pi.wave_send_repeat(f100)
+
+        time.sleep(4)
+
+        pi.wave_send_repeat(f500)
+
+        time.sleep(4)
+
+        pi.wave_tx_stop() # stop waveform
+
+        pi.wave_clear() # clear all waveforms
+        ...
+        """
+        # pigpio message format
+
+        # I p1 0
+        # I p2 0
+        # I p3 pulses * 12
+        ## extension ##
+        # III on/off/delay * pulses
+        if len(pulses):
+           ext = bytearray()
+           for p in pulses:
+              ext.extend(struct.pack("III", p.gpio_on, p.gpio_off, p.delay))
+           extents = [ext]
+           res = await self._pigpio_aio_command_ext(
+              _PI_CMD_WVAG, 0, 0, len(pulses)*12, extents)
+           return _u2i(res)
+        else:
+           return 0
+
+    async def wave_add_serial(
+        self, user_gpio, baud, data, offset=0, bb_bits=8, bb_stop=2):
+        """
+        Adds a waveform representing serial data to the existing
+        waveform (if any).  The serial data starts [*offset*]
+        microseconds from the start of the waveform.
+
+        user_gpio:= GPIO to transmit data.  You must set the GPIO mode
+                    to output.
+             baud:= 50-1000000 bits per second.
+             data:= the bytes to write.
+           offset:= number of microseconds from the start of the
+                    waveform, default 0.
+          bb_bits:= number of data bits, default 8.
+          bb_stop:= number of stop half bits, default 2.
+
+        Returns the new total number of pulses in the current waveform.
+
+        The serial data is formatted as one start bit, [*bb_bits*]
+        data bits, and [*bb_stop*]/2 stop bits.
+
+        It is legal to add serial data streams with different baud
+        rates to the same waveform.
+
+        The bytes required for each character depend upon [*bb_bits*].
+
+        For [*bb_bits*] 1-8 there will be one byte per character.
+        For [*bb_bits*] 9-16 there will be two bytes per character.
+        For [*bb_bits*] 17-32 there will be four bytes per character.
+
+        ...
+        pi.wave_add_serial(4, 300, 'Hello world')
+
+        pi.wave_add_serial(4, 300, b"Hello world")
+
+        pi.wave_add_serial(4, 300, b'\\x23\\x01\\x00\\x45')
+
+        pi.wave_add_serial(17, 38400, [23, 128, 234], 5000)
+        ...
+        """
+        # pigpio message format
+
+        # I p1 gpio
+        # I p2 baud
+        # I p3 len+12
+        ## extension ##
+        # I bb_bits
+        # I bb_stop
+        # I offset
+        # s len data bytes
+        if len(data):
+           extents = [struct.pack("III", bb_bits, bb_stop, offset), data]
+           res = await self._pigpio_aio_command_ext(
+              _PI_CMD_WVAS, user_gpio, baud, len(data)+12, extents)
+           return _u2i(res)
+        else:
+           return 0
+
+    async def wave_create(self):
+        """
+        Creates a waveform from the data provided by the prior calls
+        to the [*wave_add_**] functions.
+
+        Returns a wave id (>=0) if OK,  otherwise PI_EMPTY_WAVEFORM,
+        PI_TOO_MANY_CBS, PI_TOO_MANY_OOL, or PI_NO_WAVEFORM_ID.
+
+        The data provided by the [*wave_add_**] functions is consumed by
+        this function.
+
+        As many waveforms may be created as there is space available.
+        The wave id is passed to [*wave_send_**] to specify the waveform
+        to transmit.
+
+        Normal usage would be
+
+        Step 1. [*wave_clear*] to clear all waveforms and added data.
+
+        Step 2. [*wave_add_**] calls to supply the waveform data.
+
+        Step 3. [*wave_create*] to create the waveform and get a unique id
+
+        Repeat steps 2 and 3 as needed.
+
+        Step 4. [*wave_send_**] with the id of the waveform to transmit.
+
+        A waveform comprises one or more pulses.
+
+        A pulse specifies
+
+        1) the GPIO to be switched on at the start of the pulse.
+        2) the GPIO to be switched off at the start of the pulse.
+        3) the delay in microseconds before the next pulse.
+
+        Any or all the fields can be zero.  It doesn't make any sense
+        to set all the fields to zero (the pulse will be ignored).
+
+        When a waveform is started each pulse is executed in order with
+        the specified delay between the pulse and the next.
+
+        ...
+        wid = pi.wave_create()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVCRE, 0, 0)
+        return _u2i(res)
+
+    async def wave_create_and_pad(self, percent):
+        """
+        This function creates a waveform like [*wave_create*] but pads the consumed
+        resources. Where percent gives the percentage of the resources to use
+        (in terms of the theoretical maximum, not the current amount free).
+        This allows the reuse of deleted waves while a transmission is active.
+
+        Upon success a wave id greater than or equal to 0 is returned, otherwise
+        PI_EMPTY_WAVEFORM, PI_TOO_MANY_CBS, PI_TOO_MANY_OOL, or PI_NO_WAVEFORM_ID.
+
+        . .
+        percent: 0-100, size of waveform as percentage of maximum available.
+        . .
+
+        The data provided by the [*wave_add_**] functions are consumed by this
+        function.
+
+        As many waveforms may be created as there is space available. The
+        wave id is passed to [*wave_send_**] to specify the waveform to transmit.
+
+        A usage would be the creation of two waves where one is filled while the
+        other is being transmitted.  Each wave is assigned 50% of the resources.
+        This buffer structure allows the transmission of infinite wave sequences.
+
+        Normal usage:
+
+        Step 1. [*wave_clear*] to clear all waveforms and added data.
+
+        Step 2. [*wave_add_**] calls to supply the waveform data.
+
+        Step 3. [*wave_create_and_pad*] to create a waveform of uniform size.
+
+        Step 4. [*wave_send_**] with the id of the waveform to transmit.
+
+        Repeat steps 2-4 as needed.
+
+        Step 5. Any wave id can now be deleted and another wave of the same size
+                can be created in its place.
+
+        ...
+        wid = pi.wave_create_and_pad(50)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVCAP, percent, 0)
+        return _u2i(res)
+
+    async def wave_delete(self, wave_id):
+        """
+        This function deletes the waveform with id wave_id.
+
+        wave_id:= >=0 (as returned by a prior call to [*wave_create*]).
+
+        Wave ids are allocated in order, 0, 1, 2, etc.
+
+        The wave is flagged for deletion.  The resources used by the wave
+        will only be reused when either of the following apply.
+
+        - all waves with higher numbered wave ids have been deleted or have
+        been flagged for deletion.
+
+        - a new wave is created which uses exactly the same resources as
+        the current wave (see the C source for gpioWaveCreate for details).
+
+        ...
+        pi.wave_delete(6) # delete waveform with id 6
+
+        pi.wave_delete(0) # delete waveform with id 0
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVDEL, wave_id, 0)
+        return _u2i(res)
+
+    async def wave_tx_start(self): # DEPRECATED
+        """
+        This function is deprecated and has been removed.
+
+        Use [*wave_create*]/[*wave_send_**] instead.
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVGO, 0, 0)
+        return _u2i(res)
+
+    async def wave_tx_repeat(self): # DEPRECATED
+        """
+        This function is deprecated and has beeen removed.
+
+        Use [*wave_create*]/[*wave_send_**] instead.
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVGOR, 0, 0)
+        return _u2i(res)
+
+    async def wave_send_once(self, wave_id):
+        """
+        Transmits the waveform with id wave_id.  The waveform is sent
+        once.
+
+        NOTE: Any hardware PWM started by [*hardware_PWM*] will
+        be cancelled.
+
+        wave_id:= >=0 (as returned by a prior call to [*wave_create*]).
+
+        Returns the number of DMA control blocks used in the waveform.
+
+        ...
+        cbs = pi.wave_send_once(wid)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVTX, wave_id, 0)
+        return _u2i(res)
+
+    async def wave_send_repeat(self, wave_id):
+        """
+        Transmits the waveform with id wave_id.  The waveform repeats
+        until wave_tx_stop is called or another call to [*wave_send_**]
+        is made.
+
+        NOTE: Any hardware PWM started by [*hardware_PWM*] will
+        be cancelled.
+
+        wave_id:= >=0 (as returned by a prior call to [*wave_create*]).
+
+        Returns the number of DMA control blocks used in the waveform.
+
+        ...
+        cbs = pi.wave_send_repeat(wid)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVTXR, wave_id, 0)
+        return _u2i(res)
+
+    async def wave_send_using_mode(self, wave_id, mode):
+        """
+        Transmits the waveform with id wave_id using mode mode.
+
+        wave_id:= >=0 (as returned by a prior call to [*wave_create*]).
+           mode:= WAVE_MODE_ONE_SHOT, WAVE_MODE_REPEAT,
+                  WAVE_MODE_ONE_SHOT_SYNC, or WAVE_MODE_REPEAT_SYNC.
+
+        WAVE_MODE_ONE_SHOT: same as [*wave_send_once*].
+
+        WAVE_MODE_REPEAT same as [*wave_send_repeat*].
+
+        WAVE_MODE_ONE_SHOT_SYNC same as [*wave_send_once*] but tries
+        to sync with the previous waveform.
+
+        WAVE_MODE_REPEAT_SYNC same as [*wave_send_repeat*] but tries
+        to sync with the previous waveform.
+
+        WARNING: bad things may happen if you delete the previous
+        waveform before it has been synced to the new waveform.
+
+        NOTE: Any hardware PWM started by [*hardware_PWM*] will
+        be cancelled.
+
+        wave_id:= >=0 (as returned by a prior call to [*wave_create*]).
+
+        Returns the number of DMA control blocks used in the waveform.
+
+        ...
+        cbs = pi.wave_send_using_mode(wid, WAVE_MODE_REPEAT_SYNC)
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVTXM, wave_id, mode)
+        return _u2i(res)
+
+    async def wave_tx_at(self):
+        """
+        Returns the id of the waveform currently being
+        transmitted using [*wave_send**].  Chained waves are not supported.
+
+        Returns the waveform id or one of the following special
+        values:
+
+        WAVE_NOT_FOUND (9998) - transmitted wave not found.
+        NO_TX_WAVE (9999) - no wave being transmitted.
+
+        ...
+        wid = pi.wave_tx_at()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVTAT, 0, 0)
+        return _u2i(res)
+
+    async def wave_tx_busy(self):
+        """
+        Returns 1 if a waveform is currently being transmitted,
+        otherwise 0.
+
+        ...
+        pi.wave_send_once(0) # send first waveform
+
+        while pi.wave_tx_busy(): # wait for waveform to be sent
+           time.sleep(0.1)
+
+        pi.wave_send_once(1) # send next waveform
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVBSY, 0, 0)
+        return _u2i(res)
+
+    async def wave_tx_stop(self):
+        """
+        Stops the transmission of the current waveform.
+
+        This function is intended to stop a waveform started with
+        wave_send_repeat.
+
+        ...
+        pi.wave_send_repeat(3)
+
+        time.sleep(5)
+
+        pi.wave_tx_stop()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVHLT, 0, 0)
+        return _u2i(res)
+
+    async def wave_chain(self, data):
+        """
+        This function transmits a chain of waveforms.
+
+        NOTE: Any hardware PWM started by [*hardware_PWM*]
+        will be cancelled.
+
+        The waves to be transmitted are specified by the contents
+        of data which contains an ordered list of [*wave_id*]s
+        and optional command codes and related data.
+
+        Returns 0 if OK, otherwise PI_CHAIN_NESTING,
+        PI_CHAIN_LOOP_CNT, PI_BAD_CHAIN_LOOP, PI_BAD_CHAIN_CMD,
+        PI_CHAIN_COUNTER, PI_BAD_CHAIN_DELAY, PI_CHAIN_TOO_BIG,
+        or PI_BAD_WAVE_ID.
+
+        Each wave is transmitted in the order specified.  A wave
+        may occur multiple times per chain.
+
+        A blocks of waves may be transmitted multiple times by
+        using the loop commands. The block is bracketed by loop
+        start and end commands.  Loops may be nested.
+
+        Delays between waves may be added with the delay command.
+
+        The following command codes are supported:
+
+        Name         @ Cmd & Data @ Meaning
+        Loop Start   @ 255 0      @ Identify start of a wave block
+        Loop Repeat  @ 255 1 x y  @ loop x + y*256 times
+        Delay        @ 255 2 x y  @ delay x + y*256 microseconds
+        Loop Forever @ 255 3      @ loop forever
+
+        If present Loop Forever must be the last entry in the chain.
+
+        The code is currently dimensioned to support a chain with
+        roughly 600 entries and 20 loop counters.
+
+        ...
+        #!/usr/bin/env python
+
+        import time
+        import pigpio
+
+        WAVES=5
+        GPIO=4
+
+        wid=[0]*WAVES
+
+        pi = pigpio.pi() # Connect to local Pi.
+
+        pi.set_mode(GPIO, pigpio.OUTPUT);
+
+        for i in range(WAVES):
+           pi.wave_add_generic([
+              pigpio.pulse(1<<GPIO, 0, 20),
+              pigpio.pulse(0, 1<<GPIO, (i+1)*200)]);
+
+           wid[i] = pi.wave_create();
+
+        pi.wave_chain([
+           wid[4], wid[3], wid[2],       # transmit waves 4+3+2
+           255, 0,                       # loop start
+              wid[0], wid[0], wid[0],    # transmit waves 0+0+0
+              255, 0,                    # loop start
+                 wid[0], wid[1],         # transmit waves 0+1
+                 255, 2, 0x88, 0x13,     # delay 5000us
+              255, 1, 30, 0,             # loop end (repeat 30 times)
+              255, 0,                    # loop start
+                 wid[2], wid[3], wid[0], # transmit waves 2+3+0
+                 wid[3], wid[1], wid[2], # transmit waves 3+1+2
+              255, 1, 10, 0,             # loop end (repeat 10 times)
+           255, 1, 5, 0,                 # loop end (repeat 5 times)
+           wid[4], wid[4], wid[4],       # transmit waves 4+4+4
+           255, 2, 0x20, 0x4E,           # delay 20000us
+           wid[0], wid[0], wid[0],       # transmit waves 0+0+0
+           ])
+
+        while pi.wave_tx_busy():
+           time.sleep(0.1);
+
+        for i in range(WAVES):
+           pi.wave_delete(wid[i])
+
+        pi.stop()
+        ...
+        """
+        # I p1 0
+        # I p2 0
+        # I p3 len
+        ## extension ##
+        # s len data bytes
+
+        res = await self._pigpio_aio_command_ext(
+           _PI_CMD_WVCHA, 0, 0, len(data), [data])
+        return _u2i(res)
+
+    async def wave_get_micros(self):
+        """
+        Returns the length in microseconds of the current waveform.
+
+        ...
+        micros = pi.wave_get_micros()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSM, 0, 0)
+        return _u2i(res)
+
+    async def wave_get_max_micros(self):
+        """
+        Returns the maximum possible size of a waveform in microseconds.
+
+        ...
+        micros = pi.wave_get_max_micros()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSM, 2, 0)
+        return _u2i(res)
+
+    async def wave_get_pulses(self):
+        """
+        Returns the length in pulses of the current waveform.
+
+        ...
+        pulses = pi.wave_get_pulses()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSP, 0, 0)
+        return _u2i(res)
+
+    async def wave_get_max_pulses(self):
+        """
+        Returns the maximum possible size of a waveform in pulses.
+
+        ...
+        pulses = pi.wave_get_max_pulses()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSP, 2, 0)
+        return _u2i(res)
+
+    async def wave_get_cbs(self):
+        """
+        Returns the length in DMA control blocks of the current
+        waveform.
+
+        ...
+        cbs = pi.wave_get_cbs()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSC, 0, 0)
+        return _u2i(res)
+
+    async def wave_get_max_cbs(self):
+        """
+        Returns the maximum possible size of a waveform in DMA
+        control blocks.
+
+        ...
+        cbs = pi.wave_get_max_cbs()
+        ...
+        """
+        res = await self._pigpio_aio_command(_PI_CMD_WVSC, 2, 0)
+        return _u2i(res)
+
     async def i2c_open(self, bus, address):
         """Open an i2c device on a bus."""
         res = await self._pigpio_aio_command(_PI_CMD_I2CO, int(bus), int(address))
