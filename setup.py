@@ -5,7 +5,7 @@ with open('README.rst', 'r') as f:
     README = f.read()
 
 
-setup(name='apigpio-nad',
+setup(name='apigpio-nowls',
       version='0.0.6',
       description='asyncio-based python client for pigpiod',
       long_description=README,
@@ -25,7 +25,7 @@ setup(name='apigpio-nad',
       ],
       author='Pierre Rust',
       author_email='pierre.rust@gmail.com',
-      url='https://github.com/neildavis/apigpio',
+      url='https://github.com/nowls/apigpio',
       keywords=['gpio', 'pigpio', 'asyncio', 'raspberry'],
       packages=find_packages()
       )
